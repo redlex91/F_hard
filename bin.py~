@@ -1,0 +1,29 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from math import *
+
+
+
+mes = np.loadtxt('pressure.dat') 
+xam = 500
+
+N = len( mes )
+mpack = (N/xam)*xam 
+media = np.zeros(N)
+w = np.zeros(N)
+inc = np.zeros( xam )
+
+for m in range( 0, xam ):
+	k = 0
+	dim = (N/(m+1))*(m+1)
+	for i in range( 0, dim, (m+1) ):
+		for j in range( 0, (m+1) ):
+			w[ j ] = mes[ i+j ]
+		media[ k ] = np.mean( w )
+		k = k+1
+	inc[ m ] = np.std( media )/sqrt( dim )
+	
+print inc
+print range( 1, xam )
+
+plt.plot( range( 1, xam+1 ), inc )

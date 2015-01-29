@@ -1,0 +1,8 @@
+#!/bin/bash
+
+for(( count = 10; count<=90; count = count +10 ))
+do
+	echo "-" $count
+	echo $count > temp
+	./main.out < temp
+done
