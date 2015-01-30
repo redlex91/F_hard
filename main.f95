@@ -9,7 +9,7 @@ module constants
 use prec_def
 implicit none
 save
-integer, parameter :: NOD = 225, N_TERM = 7 ! NOD = number of disks
+integer, parameter :: NOD = 225, N_TERM = 13! NOD = number of disks
 real(long), parameter :: PI = 3.14159265358979323846264338327950288419716939937510_long, ETA_M = PI/4
 end module constants
 
@@ -47,9 +47,10 @@ integer :: flag = 0
 
 
 ! variables for computing delta_r square
-real( long ), dimension( 1:NOD ) :: xd1, xd2, yd1, yd2 ! positions of particle at start time and end time
-real( long ), dimension( 1:NOD ) :: delta_r, delta_r_sing 
-real( long ) :: start_time, end_time, step_time, chrono = 0, evo_time
+real( long ), dimension( 1:NOD ) :: xd1, yd1 !, yd1, yd2 ! positions of particle at start time and end time
+real( long ), dimension( 1:NOD ) :: delta_r_sing 
+real( long ) :: delta_r
+real( long ) :: meas_time = 0, step_time = 0.10, chrono = 0, delta1, delta2
 integer :: count_dr, flag_dr
 
 interface ! prototypes for variables check
@@ -88,7 +89,7 @@ endsubroutine ct_copies
 
 !subroutine evolve( rx, ry, vx, vy, ctime ) ! assigns new values to r after the evolution 
 !use prec_def
-!use constants
+!use constantsexit
 !implicit none
 !real( long ), dimension( 1:NOD ), intent( in ) :: vx, vy
 !real( long ), intent( in ) :: ctime
@@ -109,10 +110,10 @@ end interface ! end prototypes for variable check
 call cpu_time( start_t )
 
 
-read( *, * ) evar
-
+!read( *, * ) evar
+evar = 500.0
 ETA = ETA_M - ( evar  / 1000.0_long ) * ETA_M
-print *, ETA
+!print *, ETA
 
 sigma = sqrt( ( 4.0 * ETA ) / ( PI * NOD ) )
 
@@ -133,7 +134,12 @@ open( unit = 1, file = "energy.dat", status = "replace", access = "sequential", 
 open( unit = 2, file = "pressure.dat", status = "replace", access = "sequential", position = "rewind" ) ! opening file of pressures
 open( unit = 3, file = "speed.dat", status = "unknown", access = "sequential", position = "append" )
 open( unit = 4, file = "etavsp.dat", status = "unknown", access = "sequential", position = "append" )
-open( unit = 5, file = "deltarsq.dat", status = "replace", access = "sequential", position = "append" ) ! opening file of deltarsq
+open( unit = 7, file = "deltarsq.dat", status = "replace", access = "sequential", position = "rewind" ) ! opening file of deltarsq
+open( unit = 8, file = "times.dat", status = "replace", access = "sequential", position = "rewind" )
+
+! I write the delta_r squared for t = 0: delta_r = 0
+write( unit = 7, fmt = 101 ) 0.0
+	101 format( f20.5 )
 !===========================================================================================================================================================================================
 !===========================================================================================================================================================================================
 !===========================================================================================================================================================================================
@@ -179,7 +185,7 @@ step: do iter = 1, MAX_ITER ! one-step history
 				if( ( i == p1 .or. j == p2 .or. i == p2 .or. j == p1) ) then ! interaction with one of the two last-colliding disks
 					call ct_copies( rx( i ), ry( i ), vx( i ), vy( i ), rx( j ), ry( j ), vx( j ), vy( j ), time_tab( i, j ), sigma )
 				else ! other disks
-					time_tab( i, j ) = time_tab( i, j ) - t_ij
+					time_tab( i, j ) = time_tab( i, j ) - delta2
 				end if
 			end do
 		end do
@@ -204,60 +210,75 @@ step: do iter = 1, MAX_ITER ! one-step history
 	end do collision_time
 !print *, ""
 
-if( t_ij < 0 ) call abort
+if( t_ij < 0 ) then
+	print *, " tempo <0 "
+	call abort
+endif
 !print *, "Collision time: ", t_ij, "disks:", p1, p2
 
-! measuring total time
-chrono = chrono + t_ij
-print *, chrono
-
-! start of delta_r_sq
-
-start_dr: if( start_time >= t_ij ) then
-
-! I'm computing the time between the last collsion and start_time
-	evo_time = t_ij - ( chrono - start_time )
-	! I let the system evolve for evo_time
-	do i = 1, NOD
-		xd1( i ) = rx( i ) + vx( i ) * evo_time
-		yd1( i ) = ry( i ) + vy( i ) * evo_time
-		! I project the new positions if the disks go outside the box
-			xd1( i ) = xd1( i ) - floor( xd1( i ) )
-			yd1( i ) = yd1( i ) - floor( yd1( i ) )
-		endif
+if( iter < N_TERM * NOD ) then
+	meas_time = chrono
+elseif( iter == N_TERM * NOD ) then
+	meas_time = chrono + step_time
+	do i= 1, NOD
+		xd1( i ) = rx( i )
+		yd1( i ) = ry( i )
+		delta_r_sing( i ) = 0
 	enddo
-	! updating start_time
-	start_time = start_time + step_time
-endif start_dr
-end_dr: if( end_time > t_ij ) then
+!print *, "PRIMA", meas_time
+endif
 
-	evo_time = t_ij - ( chrono - t_end )
-	 ! I let the system evolve for evo_time
+deltarsq: if( meas_time - chrono <= t_ij .and. iter >= N_TERM * NOD ) then
+	delta1 = meas_time - chrono
+	!print *, iter, meas_time, delta1, t_ij
+	! evolution of the system by delta1
+	do k = 1, NOD
+		rx( k ) = rx( k ) + vx( k ) * delta1
+		ry( k ) = ry( k ) + vy( k ) * delta1
+		! projection inside the box
+		rx( k ) = rx( k ) - floor( rx( k ) )
+		ry( k ) = ry( k ) - floor( ry( k ) )
+	end do
+	! measure of dr
+	do k = 1, NOD
+		delta_r_sing( k ) = distance( xd1( k ), yd1( k ), rx( k ), ry( k ) )**2
+	end do
+	delta_r = 0
 	do i = 1, NOD
-		xd2( i ) = rx( i ) + vx( i ) * evo_time
-		yd2( i ) = ry( i ) + vy( i ) * evo_time
-		! I project the new positions if the disks go outside the box
-			xd2( i ) = xd1( i ) - floor( xd1( i ) )
-			yd2( i ) = yd1( i ) - floor( yd1( i ) )
-		endif
+	delta_r = delta_r + delta_r_sing( i )
 	enddo
-	! updating start_time
-	end_time = end_time + step_time
-	! I compute the delta_r for a single particle
-	delta_r
-	
-endif end_dr
-! end of delta_r_sq
+	write( unit = 7, fmt = 100 ) delta_r/NOD
+		100 format( f20.15 )
+	! translation of the table of collision times
+	do i = 1, NOD
+		do j = i + 1 , NOD
+			time_tab( i, j ) = time_tab( i, j ) - delta1
+		enddo
+	enddo
+	! refresh time of measure
+	meas_time = meas_time + step_time
+	else 
+		delta1 = 0
+endif deltarsq
 
+delta2 = t_ij - delta1
 
 ! evolution of the system - new disks' positions
 do k = 1, NOD ! assigns the new positions after the evolution
-	rx( k ) = rx( k ) + vx( k ) * t_ij
-	ry( k ) = ry( k ) + vy( k ) * t_ij
+	rx( k ) = rx( k ) + vx( k ) * delta2
+	ry( k ) = ry( k ) + vy( k ) * delta2
 	! projection inside the box
 	rx( k ) = rx( k ) - floor( rx( k ) )
 	ry( k ) = ry( k ) - floor( ry( k ) )
 end do
+
+
+! measuring total time
+chrono = chrono + t_ij
+!print *, chrono
+write( unit = 8, fmt = 200 ) t_ij, chrono
+	200 format( f20.15, f20.15 )
+
 
 ! EVOLUTION of the system - new disks' SPEEDS
 !call up_speed( rx, ry, vx, vy, p1, p2 )
@@ -310,19 +331,22 @@ do i=1,NOD
 		endif
 	end do
 end do
-write (*,100) ( iter*100.0_long )/MAX_ITER
-	100 format ("running...", f7.1, " %")
 
-write( unit = 1, fmt = 11 ) ( dot_product( vx, vx ) + dot_product( vy, vy ) )/2.0_long ! writing energies on file
-	11 format( f20.18 )
+
+
+write (*,400) ( iter*100.0_long )/MAX_ITER
+	400 format ("running...", f7.1, " %")
+
+write( unit = 1, fmt = 500 ) ( dot_product( vx, vx ) + dot_product( vy, vy ) )/2.0_long ! writing energies on file
+	500 format( f20.18 )
 	
 ! PRESSURE COMPUTATION
 kin_en = ( dot_product( vx, vx ) + dot_product( vy, vy ) )/2.0_long
 if( mod( iter, n_int ) == 0 .and. iter >= N_TERM * NOD ) then 
 	if( flag .ne. 0 ) then
 		press = 1 + ( ( sigma ) / ( 3 * kin_en ) ) * ( sum_delta_v / t_int )
-		write( unit = 2, fmt = 12 ) press ! write pressure data on file
-			12 format( f20.15 )
+		write( unit = 2, fmt = 600 ) press ! write pressure data on file
+			600 format( f20.15 )
 			meanP = meanP + press
 			Pdata = Pdata + 1
 	endif
@@ -338,35 +362,44 @@ endif
 ! print speed at a time
 if( iter == nspeed ) then
 	do i = 1, NOD
-		write( unit = 3, fmt = 103 ) vx(i)
-			103 format( f20.15 )
+		write( unit = 3, fmt = 700 ) vx(i)
+			700 format( f20.15 )
 	enddo
 endif
 
 end do step
 
+!===========================================================================================================================================================================================
+!===========================================================================================================================================================================================
+!===========================================================================================================================================================================================
+! 														END ITERATIONS === END ITERATIONS === END ITERATIONS === END ITERATIONS === END ITERATIONS 
+!===========================================================================================================================================================================================
+!===========================================================================================================================================================================================
+!===========================================================================================================================================================================================
 
 meanP = meanP / Pdata
-write( unit = 4, fmt = 33 ) eta, meanP
-	33 format( f10.3, f20.15 )
+write( unit = 4, fmt = 800 ) eta, meanP
+	800 format( f10.3, f20.15 )
 
 call cpu_time( end_t )
-write (*,110) end_t - start_t
-	110 format ("Execution lasted: ", f10.2, " seconds.")
+write (*,900) end_t - start_t
+	900 format ("Execution lasted: ", f10.2, " seconds.")
 	
 ! FILES
 close( unit = 1 )
 close( unit = 2 )
 close( unit = 3 )
 close( unit = 4 )
-close( unit = 5 )
+close( unit = 7 )
+close( unit = 8 )
 endprogram hard_disks
 
 
 
 
-
-
+!===========================================================================================================================================================================================
+!================================================================================== SUBROUTINE DEFINITIONS =================================================================================
+!===========================================================================================================================================================================================
 
 
 
