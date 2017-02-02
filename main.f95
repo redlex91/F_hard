@@ -1,19 +1,21 @@
-! MODULEs
+! modules
+
 MODULE prec_def
   IMPLICIT NONE
   SAVE
   INTEGER, PARAMETER:: sp = KIND( 1.0 ), &
        dp = SELECTED_REAL_KIND( 2 * PRECISION( 1._sp ) ), &
        qp = SELECTED_REAL_KIND( 2 * PRECISION( 1._dp ) ), &
-       prec = dp ! precision in use
+       prec = qp ! precision in use
 ENDMODULE prec_def
 
 MODULE constants
   USE prec_def
+
   IMPLICIT NONE
   SAVE
-  INTEGER, PARAMETER :: NOD = 225, N_TERM = 13 ! NOD = number of disks
-  INTEGER, PARAMETER :: MAX_ITER = 1e5, nspeed = 30 ! max number of iterations
+  INTEGER, PARAMETER :: NOD = 100, N_TERM = 13 ! NOD = number of disks
+  INTEGER, PARAMETER :: MAX_ITER = 150000, nspeed = 30 ! max number of iterations
 
   REAL( prec ), PARAMETER :: PI = 3.14159265358979323846264338327950288419716939937510_prec, ETA_M = PI/4
 ENDMODULE constants
@@ -130,11 +132,11 @@ CONTAINS
     IF( ABS( b1 - b2 ) > 0.5_prec ) b2 = b2 - SIGN( 1.0_prec, b2 - b1 )
 
     distance = SQRT( (a2 - a1 )**2._prec + ( b2 - b1 )**2._prec )
-
+   
     RETURN
   ENDFUNCTION distance
 
-  SUBROUTINE compute_ct( x1, y1, vx1, vy1, x2, y2, vx2, vy2, time )
+  FUNCTION collision_time( x1, y1, vx1, vy1, x2, y2, vx2, vy2 )
     !Purpose: this sbrt  computes the collision time between two disks
 
     USE prec_def
@@ -142,82 +144,140 @@ CONTAINS
 
     IMPLICIT NONE
     REAL( prec ), INTENT( IN ) :: x1, y1, vx1, vy1, x2, y2, vx2, vy2
-    REAL( prec ), INTENT( INOUT ) :: time
+    REAL( prec ) :: collision_time ! collision time
     ! local variables
+    REAL( prec ), DIMENSION( 1 : 9 ) :: vtimes ! this vector contains the collision times with the images
     REAL( prec ), DIMENSION( 1 : 2 ) :: r12, v12
     REAL( prec ) :: r_dot_v, sqnr, sqnv, discrim ! dot product of r12 and v12, square module od r12, square module of v12
-
-    r12( 1 ) = x1 - x2; r12( 2 ) = y1 - y2
-    v12( 1 ) = vx1 - vx2; v12( 2 ) = vy1 - vy2
-
-    r_dot_v = DOT_PRODUCT( r12, v12 ) ! refer to formula 1.26
-    sqnr = DOT_PRODUCT( r12, r12 )
-    sqnv = DOT_PRODUCT( v12, v12 )
-    discrim = r_dot_v - sqnv * ( sqnr - sigma**2._prec )
-
-    IF( r_dot_v < 0 .AND. discrim >= 0 ) THEN ! there exists real solutions
-       time = ( - r_dot_v - SQRT( discrim ) ) / sqnv 
-    ELSE
-       time = HUGE( 1.0_prec ) ! no collision: set tij to the maximum possible value
-    ENDIF
-
-    ! write (*,*), "tempo di coll.: ", time, " dot p.:", r_dot_v
-
-  ENDSUBROUTINE compute_ct
-
-  SUBROUTINE min_find( vtimes, min_time )
-    !Purpose: this sbrt finds the minimum of a vector
-
-    USE prec_def
-    USE constants
-
-    IMPLICIT NONE
-    REAL( prec ), DIMENSION( 1 : 9 ), INTENT( IN ) :: vtimes
-    REAL( prec ), INTENT( INOUT ) :: min_time
-    ! local variables
-    INTEGER :: k
-
-    min_time = vtimes( 1 )
-    DO k = 1 , 9
-       IF ( vtimes( k ) < min_time ) min_time = vtimes( k )
-    ENDDO
-
-    !write (*,*), "Min vettore", min_time
-  ENDSUBROUTINE min_find
-
-  SUBROUTINE ct_copies( x1, y1, vx1, vy1, x2, y2, vx2, vy2, mtime ) ! compute the collision time among a disks and the nine copies of a second
-
-    USE prec_def
-    USE constants
-    
-    IMPLICIT NONE
-    REAL( prec ), INTENT( IN ) :: x1, y1, vx1, vy1, x2, y2, vx2, vy2
-    REAL( prec ), INTENT( INOUT ) :: mtime ! minimum collision time among one disk and the nine copies of a second
-    ! local var
     INTEGER :: p, q, k
-    REAL( prec ), DIMENSION( 1:9 ) :: vtimes
 
-    !write (*,*) "COPIES"
-    k=1
-    DO p = -1,1
-       DO q = -1,1
-          !		write (*,*), "vettore prima", vtimes(k)
-          CALL compute_ct( x1, y1, vx1, vy1, x2 - p*1.0, y2 - q*1.0, vx2, vy2, vtimes( k ) )
-          !		write (*,*), "vettore dopo", vtimes(k)
-          k = k+1
-       ENDDO
+    k = 1
+    DO p = -1 , 1
+       DO q = -1 , 1
+          r12( 1 ) = x1 - ( x2 - p * 1._prec ); r12( 2 ) = y1 - ( y2 - q * 1._prec )
+          v12( 1 ) = vx1 - vx2; v12( 2 ) = vy1 - vy2
+
+          r_dot_v = DOT_PRODUCT( r12, v12 ) ! refer to formula 1.26
+          sqnr = DOT_PRODUCT( r12, r12 )
+          sqnv = DOT_PRODUCT( v12, v12 )
+          discrim = r_dot_v**2._prec - sqnv * ( sqnr - sigma**2._prec )
+
+          IF( r_dot_v < 0._prec .AND. discrim >= 0._prec ) THEN ! there exists real solutions
+             vtimes( k ) = ( - r_dot_v - SQRT( discrim ) ) / sqnv 
+          ELSE
+             vtimes( k ) = HUGE( 1.0_prec ) ! no collision: set tij to the maximum possible value
+          ENDIF
+          k = k + 1
+       END DO
+    END DO
+
+    collision_time = HUGE( 1._prec ) ! vtimes( 1 )
+    DO k = 1 , 9
+       IF ( vtimes( k ) < collision_time ) collision_time = vtimes( k )
     ENDDO
 
-    !DO k=1,9
-    !	write (*,*), "vettore dopo dopo", vtimes(k)
-    !endDO
 
-    CALL min_find( vtimes, mtime )
+    !write (*,*) "tempo di coll. ( compute_ct ): ", ctime, " dot p.:", r_dot_v
 
-    !write (*,*), "Min delle 9 copie: ", mtime
-  ENDSUBROUTINE ct_copies
+  ENDFUNCTION collision_time
+  
+  ! SUBROUTINE ct_copies( x1, y1, vx1, vy1, x2, y2, vx2, vy2, mtime ) ! compute the collision time among a disks and the nine copies of a second
+
+  !   USE prec_def
+  !   USE constants
+
+  !   IMPLICIT NONE
+  !   REAL( prec ), INTENT( IN ) :: x1, y1, vx1, vy1, x2, y2, vx2, vy2
+  !   REAL( prec ), INTENT( INOUT ) :: mtime ! minimum collision time among one disk and the nine copies of a second
+  !   ! local var
+  !   INTEGER :: p, q, k
+  !   REAL( prec ), DIMENSION( 1:9 ) :: vtimes
+
+  !   !write (*,*) "COPIES"
+  !   k=1
+  !   DO p = -1,1
+  !      DO q = -1,1
+  !         !		write (*,*), "vettore prima", vtimes(k)
+  !         CALL compute_ct( x1, y1, vx1, vy1, x2 - p * 1._prec, y2 - q * 1._prec, vx2, vy2, vtimes( k ) )
+  !         !		write (*,*), "vettore dopo", vtimes(k)
+  !         k = k + 1
+  !      ENDDO
+  !   ENDDO
+
+  !   !DO k=1,9
+  !   !	write (*,*), "vettore dopo dopo", vtimes(k)
+  !   !endDO
+
+  !   CALL min_find( vtimes, mtime )
+
+  !   !write (*,*), "Min delle 9 copie: ", mtime
+  ! ENDSUBROUTINE ct_copies
+
+  
+  ! SUBROUTINE min_find( vtimes, min_time )
+  !   !Purpose: this sbrt finds the minimum of a vector
+
+  !   USE prec_def
+  !   USE constants
+
+  !   IMPLICIT NONE
+  !   REAL( prec ), DIMENSION( 1 : 9 ), INTENT( IN ) :: vtimes
+  !   REAL( prec ), INTENT( INOUT ) :: min_time
+  !   ! local variables
+  !   INTEGER :: k
+
+  !   min_time = HUGE( 1._prec ) ! vtimes( 1 )
+  !   DO k = 1 , 9
+  !      IF ( vtimes( k ) < min_time ) min_time = vtimes( k )
+  !   ENDDO
+
+  !   !write (*,*), "Min vettore", min_time
+  ! ENDSUBROUTINE min_find
 
 ENDMODULE utilities
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 PROGRAM hard_disks
 
@@ -260,62 +320,8 @@ PROGRAM hard_disks
   REAL( prec ), DIMENSION( 1:NOD ) :: xd1, yd1 !, yd1, yd2 ! positions of particle at start time and end time
   REAL( prec ), DIMENSION( 1:NOD ) :: delta_r_sing 
   REAL( prec ) :: delta_r
-  REAL( prec ) :: meas_time = 0, step_time = 0.10, chrono = 0, delta1, delta2
+  REAL( prec ) :: meas_time = 0, step_time = 0.10, time = 0, delta1, delta2
   INTEGER :: count_dr, flag_dr
-
-  ! interface ! prototypes for variables check
-
-  !    subroutine init_cond( x, y, vx, vy ) ! assigns the initial conditions fo the system
-  !      USE prec_def
-  !      USE constants
-  !      IMPLICIT NONE
-  !      REAL( prec ), DIMENSION( 1 : NOD ), intent( out ) ::  x, y, vx, vy
-  !    end subroutine init_cond
-
-  !    subroutine compute_ct( x1, y1, vx1, vy1, x2, y2, vx2, vy2, time, sigma ) ! compute the collision time between two disks
-  !      USE prec_def
-  !      USE constants
-  !      IMPLICIT NONE
-  !      REAL( prec ), intent( in ) :: x1, y1, vx1, vy1, x2, y2, vx2, vy2, sigma
-  !      REAL( prec ), intent( inout ) :: time
-  !    endsubroutine compute_ct
-
-  !    subroutine min_find( vtimes, min_time ) ! finds the minimum of a vector
-  !      USE prec_def
-  !      USE constants
-  !      IMPLICIT NONE
-  !      REAL( prec ), DIMENSION( 1:9 ), intent( in ) :: vtimes
-  !      REAL( prec ), intent( inout ) :: min_time
-  !    endsubroutine min_find
-
-  !    subroutine ct_copies( x1, y1, vx1, vy1, x2, y2, vx2, vy2, mtime, sigma ) ! compute the collision time between a disk 
-  !      ! and one of the nine copies of another
-  !      USE prec_def
-  !      USE constants
-  !      IMPLICIT NONE
-  !      REAL( prec ), intent( in ) :: x1, y1, vx1, vy1, x2, y2, vx2, vy2, sigma
-  !      REAL( prec ), intent( inout ) :: mtime ! minimum collision time among one disk and the nine copies of a second
-  !    endsubroutine ct_copies
-
-  !    !subroutine evolve( rx, ry, vx, vy, ctime ) ! assigns new values to r after the evolution 
-  !    !USE prec_def
-  !    !USE constantsexit
-  !    !IMPLICIT NONE
-  !    !REAL( prec ), DIMENSION( 1:NOD ), intent( in ) :: vx, vy
-  !    !REAL( prec ), intent( in ) :: ctime
-  !    !REAL( prec ), DIMENSION( 1:NOD ), intent( inout ) :: rx, ry
-  !    !endsubroutine evolve
-
-  !    !subroutine up_speed( rx, ry, vx, vy, p1, p2 )
-  !    !USE prec_def
-  !    !USE constants
-  !    !IMPLICIT NONE
-  !    !REAL( prec ), DIMENSION( 1:NOD ), intent( in ) :: rx, ry
-  !    !REAL( prec ), DIMENSION( 1:NOD ), intent( inout ) :: vx, vy
-  !    !INTEGER, intent( in ) :: p1, p2
-  !    !endsubroutine up_speed
-
-  ! end interface ! end prototypes for variable check
 
 
   ! FILES
@@ -338,15 +344,15 @@ PROGRAM hard_disks
 
   CALL init_cond( rx, ry, vx, vy ) ! initiliasing the system
 
-  !DO i = 1, NOD ! printing the IC
-  !	print *, '(', rx( i ), ',', ry( i ), '),', '(', vx( i ), ',', vy( i ), ')'
-  !ENDDO
+  ! DO i = 1, NOD ! printing the IC
+  ! 	print *, '(', rx( i ), ',', ry( i ), '),', '(', vx( i ), ',', vy( i ), ')'
+  ! ENDDO
 
-  DO i = 1, NOD ! initialising the table of collision times with all 0s
-     DO j= 1,NOD
-        time_tab( i, j ) = 0
-     ENDDO
-  ENDDO
+  FORALL( i = 1 : NOD ) ! initialising the table of collision times with all 0s
+     FORALL( j = 1 : NOD )
+        time_tab( i, j ) = 0._prec
+     ENDFORALL
+  ENDFORALL
 
 
   ! I write the delta_r squared for t = 0: delta_r = 0
@@ -360,7 +366,8 @@ PROGRAM hard_disks
   !===========================================================================================================================================================================================
   !===========================================================================================================================================================================================
 
-  step: DO iter = 1, MAX_ITER ! one-step history
+  PRINT *, "sigma = ", sigma
+  step: DO iter = 1 , MAX_ITER ! one-step history
 
 
 
@@ -383,11 +390,12 @@ PROGRAM hard_disks
 
      time_refresh: IF( iter == 1 ) THEN ! first step
         DO i= 1, NOD
-           DO j= i , NOD
+           DO j = i , NOD
               IF( i == j ) THEN
                  time_tab( i, j ) = 0
               ELSE
-                 CALL ct_copies( rx( i ), ry( i ), vx( i ), vy( i ), rx( j ), ry( j ), vx( j ), vy( j ), time_tab( i, j ) )
+                 time_tab( i, j ) = collision_time( rx( i ), ry( i ), vx( i ), vy( i ), rx( j ), ry( j ), vx( j ), vy( j ) )
+                 !PRINT *, i , j , time_tab( i, j )
               ENDIF
            ENDDO
         ENDDO
@@ -395,24 +403,25 @@ PROGRAM hard_disks
         DO i = 1 , NOD
            DO j = i + 1 , NOD
               IF( ( i == p1 .or. j == p2 .or. i == p2 .or. j == p1) ) THEN ! interaction with one of the two last-colliding disks
-                 CALL ct_copies( rx( i ), ry( i ), vx( i ), vy( i ), rx( j ), ry( j ), vx( j ), vy( j ), time_tab( i, j ) )
+                 time_tab( i, j ) = collision_time( rx( i ), ry( i ), vx( i ), vy( i ), rx( j ), ry( j ), vx( j ), vy( j ) )
               ELSE
                  ! other disks
-                 time_tab( i, j ) = time_tab( i, j ) - delta2
-              end if
+                 time_tab( i, j ) = time_tab( i, j ) - t_ij ! - delta2
+              ENDIF
            ENDDO
         ENDDO
-     end if time_refresh
+     ENDIF time_refresh
 
-     !	DO i=1, NOD
-     !		DO j=i,NOD
-     !			write (*, *), time_tab( i, j )
-     !		endDO
-     !		print *, ""
-     !	endDO
+
+     	! DO i=1, NOD
+     	! 	DO j=i,NOD
+     	! 		write (*, *) time_tab( i, j )
+     	! 	endDO
+     	! 	print *, ""
+     	! endDO
 
      t_ij = HUGE( 1.0_prec ) ! computing the minimum time of the table
-     collision_time: DO i = 1 , NOD
+     compute_collision_time: DO i = 1 , NOD
         DO j = i , NOD
            IF( time_tab( i, j ) < t_ij .AND. i.NE.j ) THEN
               t_ij = time_tab( i, j ) 
@@ -420,29 +429,29 @@ PROGRAM hard_disks
               p2 = j
            ENDIF
         ENDDO
-     ENDDO collision_time
+     ENDDO compute_collision_time
      !print *, ""
 
      IF( t_ij < 0 ) THEN
 	PRINT *, " tempo <0 "
 	CALL abort
      ENDIF
-     !print *, "Collision time: ", t_ij, "disks:", p1, p2
+     print *, "Collision time: ", t_ij, "disks:", p1, p2
 
-     IF( iter < N_TERM * NOD ) THEN
-	meas_time = chrono
-     ELSEIF( iter == N_TERM * NOD ) THEN
-	meas_time = chrono + step_time
-	DO i= 1 , NOD
-           xd1( i ) = rx( i )
-           yd1( i ) = ry( i )
-           delta_r_sing( i ) = 0
-	ENDDO
- !print *, "PRIMA", meas_time
-     ENDIF
+ !     IF( iter < N_TERM * NOD ) THEN
+ !        meas_time = time
+ !     ELSEIF( iter == N_TERM * NOD ) THEN ! set instant t = 0 for the measure of the msqd
+ !        meas_time = time + step_time
+ !        FORALL( i = 1 : NOD )
+ !           xd1( i ) = rx( i )
+ !           yd1( i ) = ry( i )
+ !           delta_r_sing( i ) = 0
+ !        ENDFORALL
+ ! !print *, "PRIMA", meas_time
+ !     ENDIF
 
-!      deltarsq: IF( meas_time - chrono <= t_ij .AND. iter >= N_TERM * NOD ) THEN
-! 	delta1 = meas_time - chrono
+!      deltarsq: IF( meas_time - time <= t_ij .AND. iter >= N_TERM * NOD ) THEN
+! 	delta1 = meas_time - time
 !  !print *, iter, meas_time, delta1, t_ij
 !  ! evolution of the system by delta1
 ! 	DO k = 1 , NOD
@@ -477,19 +486,19 @@ PROGRAM hard_disks
 !      delta2 = t_ij - delta1
 
      ! evolution of the system - new disks' positions
-     DO k = 1, NOD ! assigns the new positions after the evolution
+     FORALL( k = 1 : NOD ) ! assigns the new positions after the evolution
 	rx( k ) = rx( k ) + vx( k ) * t_ij!delta2
 	ry( k ) = ry( k ) + vy( k ) * t_ij!delta2
  ! projection inside the box
 	rx( k ) = rx( k ) - FLOOR( rx( k ) )
 	ry( k ) = ry( k ) - FLOOR( ry( k ) )
-     ENDDO
+     ENDFORALL
 
 
      ! measuring total time
-     chrono = chrono + t_ij
-     !print *, chrono
-     WRITE( unit = 8, fmt = 200 ) t_ij, chrono
+     time = time + t_ij
+     !print *, time
+     WRITE( unit = 8, fmt = 200 ) t_ij, time
 200  FORMAT( f20.15, f20.15 )
 
 
@@ -537,13 +546,13 @@ PROGRAM hard_disks
      !write (*,*), "energia: ",( dot_product( vx, vx ) + dot_product( vy, vy ) )/2.0_prec
      ! OVERLAP ROUTINE : verifies that no overlap has happened
      DO i = 1 , NOD 
-	DO j = i + 1 , NOD
-    IF( distance( rx( i ), ry( i ), rx( j ), ry( j ) ) - sigma  < - TINY( 1._prec )  &
-         .AND.  i .NE. p1  .AND.  j .NE. p2  )  THEN
+        DO j = i + 1 , NOD
+           IF( distance( rx( i ), ry( i ), rx( j ), ry( j ) ) - sigma  < -TINY( 1._prec )  &
+                .AND.  i .NE. p1  .AND.  j .NE. p2  )  THEN
               PRINT *, "ERRORE, passo", iter, distance( rx( i ), ry( i ), rx( j ), ry( j ) ) - sigma, "disks: ", i, j
               CALL abort
            ENDIF
-	ENDDO
+        ENDDO
      ENDDO
 
 
@@ -552,26 +561,26 @@ PROGRAM hard_disks
 400  FORMAT("running...", f7.1, " %")
 
      WRITE( unit = 1, fmt = 500 ) ( DOT_PRODUCT( vx, vx ) + DOT_PRODUCT( vy, vy ) ) / 2.0_prec ! writing energies on file
-500  FORMAT( f20.18 )
+500  FORMAT( f9.3 )
 
-     ! PRESSURE COMPUTATION
-     kin_en = ( DOT_PRODUCT( vx, vx ) + DOT_PRODUCT( vy, vy ) ) / 2.0_prec
-     IF( MOD( iter, n_int ) == 0 .AND. iter >= N_TERM * NOD ) THEN 
-	IF( flag .NE. 0 ) THEN
-           press = 1._prec + ( ( sigma ) / ( 3._prec * kin_en ) ) * ( sum_delta_v / t_int )
-           WRITE( unit = 2, fmt = 600 ) press ! write pressure data on file
-600        FORMAT( f20.15 )
-           meanP = meanP + press
-           Pdata = Pdata + 1
-	ENDIF
- !print *, iter, press, t_int
-	t_int = 0
-	sum_delta_v = 0
-     ELSEIF( ( MOD( iter, n_int ) .NE. 0 ) .AND. ( iter >= N_TERM * NOD ) ) THEN 
-	flag = 1
-	t_int =  t_int + t_ij
-	sum_delta_v = SQRT( DOT_PRODUCT( delta_v , delta_v ) ) + sum_delta_v
-     ENDIF
+   !   ! PRESSURE COMPUTATION
+!      kin_en = ( DOT_PRODUCT( vx, vx ) + DOT_PRODUCT( vy, vy ) ) / 2.0_prec
+!      IF( MOD( iter, n_int ) == 0 .AND. iter >= N_TERM * NOD ) THEN 
+! 	IF( flag .NE. 0 ) THEN
+!            press = 1._prec + ( ( sigma ) / ( 3._prec * kin_en ) ) * ( sum_delta_v / t_int )
+!            WRITE( unit = 2, fmt = 600 ) press ! write pressure data on file
+! 600        FORMAT( f20.15 )
+!            meanP = meanP + press
+!            Pdata = Pdata + 1
+! 	ENDIF
+!  !print *, iter, press, t_int
+! 	t_int = 0
+! 	sum_delta_v = 0
+!      ELSEIF( ( MOD( iter, n_int ) .NE. 0 ) .AND. ( iter >= N_TERM * NOD ) ) THEN 
+! 	flag = 1
+! 	t_int =  t_int + t_ij
+! 	sum_delta_v = SQRT( DOT_PRODUCT( delta_v , delta_v ) ) + sum_delta_v
+!      ENDIF
 
      ! print speed at a time
      IF( iter == nspeed ) THEN
@@ -591,7 +600,7 @@ PROGRAM hard_disks
   !===========================================================================================================================================================================================
   !===========================================================================================================================================================================================
 
-  meanP = meanP / Pdata
+  !meanP = meanP / Pdata
   WRITE( unit = 4, fmt = 800 ) eta, meanP
 800 FORMAT( f10.3, f20.15 )
 
@@ -605,7 +614,7 @@ PROGRAM hard_disks
   CLOSE( unit = 3 )
   CLOSE( unit = 4 )
   CLOSE( unit = 7 )
-  close( unit = 8 )
+  CLOSE( unit = 8 )
 
 ENDPROGRAM hard_disks
 
